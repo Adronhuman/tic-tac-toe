@@ -1,0 +1,10 @@
+set shell := ["cmd.exe", "/c"]
+
+sudo-build:
+    sudo just build
+
+build:
+    wasm-pack build --target web --out-dir static_server
+    
+copy-main:
+    copy target\\wasm32-unknown-unknown\\debug\\bevy_wasm.wasm static_server /y

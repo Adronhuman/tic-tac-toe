@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package game;
+
+message Update {
+    oneof update_message {
+        Chat chat_update = 1;
+        MetaInfo meta_update = 2;
+        PlayerMove move_update = 3;
+    }
+}
+
+message Chat {
+    string sms = 1;
+}
+
+message MetaInfo {
+    string info = 1;
+}
+
+message PlayerMove {
+    int32 move = 1;
+}
