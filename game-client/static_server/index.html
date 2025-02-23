@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en-US">
+  <head>
+    <meta charset="utf-8" />
+    <title>hello-wasm example</title>
+  </head>
+  <body>
+    <script>
+        // const socket = new WebSocket("ws://localhost:3001/ws");
+
+        // // Connection opened
+        // socket.addEventListener("open", (event) => {
+        //     socket.send("Hello Server!");
+        // });
+        window.socketDataHandler = () => {};
+
+        function listenToSocketData(handler) {
+          console.log("at least tried to pass something", handler);
+          window.socketDataHandler = handler;
+        }
+
+        function noop() {
+          console.log("noop called");
+        }
+    </script>
+    <script type="module">
+      import init, { start_bevy } from "./game.js";
+      init().then(() => {
+        start_bevy();
+      });
+      setInterval(() => {
+        let byteArray = crypto.getRandomValues(new Uint8Array(8));
+          window.socketDataHandler(byteArray);
+        }, 1000);
+    </script>
+  </body>
+</html>
