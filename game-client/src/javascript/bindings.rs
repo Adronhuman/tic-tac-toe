@@ -8,6 +8,7 @@ extern "C" {
     pub fn log(s: &str);
     pub fn alert(s: &str);
     pub fn listenToSocketData(f: &Function);
+    pub fn sendDataToSocket(data: Vec<u8>);
 }
 
 #[macro_export]

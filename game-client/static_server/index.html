@@ -19,19 +19,19 @@
           window.socketDataHandler = handler;
         }
 
-        function noop() {
-          console.log("noop called");
+        function sendDataToSocket(data) {
+          console.log("received data", data);
         }
     </script>
     <script type="module">
-      import init, { start_bevy } from "./game.js";
+      import init, { start_bevy } from "./game_client.js";
       init().then(() => {
         start_bevy();
       });
-      setInterval(() => {
-        let byteArray = crypto.getRandomValues(new Uint8Array(8));
-          window.socketDataHandler(byteArray);
-        }, 1000);
-    </script>
+      // setInterval(() => {
+      // }, 1000);
+      window.byteArray = crypto.getRandomValues(new Uint8Array(8));
+      window.socketDataHandler(window.byteArray);
+      </script>
   </body>
 </html>

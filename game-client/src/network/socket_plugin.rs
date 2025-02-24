@@ -1,10 +1,12 @@
-use bevy::{app::{App, Plugin, Update}, ecs::{event::{Event, EventWriter}, system::{Res, Resource}}};
+use bevy::{app::{App, Plugin, Update}, ecs::{event::{Event, EventReader, EventWriter}, schedule::{common_conditions::on_event, IntoSystemConfigs}, system::{Res, Resource}}};
 use crossbeam::channel::{bounded, Receiver};
 use js_sys::Function;
-use messages::game::{update::UpdateMessage, PlayerMove};
+use messages::game::{update::UpdateMessage, Chat, PlayerMove};
+use prost::Message;
 use wasm_bindgen::{prelude::Closure, JsCast};
+use crate::javascript::bindings::log;
 
-use crate::javascript::bindings::listenToSocketData;
+use crate::{console_log, javascript::bindings::{listenToSocketData, sendDataToSocket}};
 
 #[derive(Resource)]
 struct UpdateReceiver {
@@ -34,20 +36,36 @@ impl Plugin for SocketPlugin {
     
         app
             .insert_resource(state)
-            .add_systems(Update, update_system)
-            .add_event::<SocketMessage>();
+            .add_systems(Update, (receive_system, send_system.run_if(on_event::<SocketSend>)))
+            .add_event::<SocketRecv>()
+            .add_event::<SocketSend>();
     }
 }
 
-fn update_system(
+fn receive_system(
     state: Res<UpdateReceiver>,
-    mut ev_message: EventWriter<SocketMessage> 
+    mut ev_message: EventWriter<SocketRecv> 
 ) {
     if let Ok(new_state) = state.reciever.try_recv() {
         let numbers = new_state.data;
-        ev_message.send(SocketMessage(UpdateMessage::MoveUpdate(PlayerMove { r#move: numbers[0] as i32})));
+        ev_message.send(SocketRecv(UpdateMessage::MoveUpdate(PlayerMove { r#move: numbers[0] as i32})));
+    }
+}
+
+fn send_system(mut ev_message: EventReader<SocketSend>) {
+    console_log!("send system is called");
+    for SocketSend(ev) in ev_message.read() {
+        let bytes = match ev {
+            UpdateMessage::ChatUpdate(chat) => chat.encode_to_vec(),
+            UpdateMessage::MetaUpdate(meta) => meta.encode_to_vec(),
+            UpdateMessage::MoveUpdate(mv) => mv.encode_to_vec()
+        };
+        sendDataToSocket(bytes);
     }
 }
 
 #[derive(Event)]
-pub struct SocketMessage(pub UpdateMessage);
+pub struct SocketRecv(pub UpdateMessage);
+
+#[derive(Event)]
+pub struct SocketSend(pub UpdateMessage);
