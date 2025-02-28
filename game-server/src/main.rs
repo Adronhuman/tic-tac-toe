@@ -97,7 +97,7 @@ impl GameState {
 
     fn check_combination(&self, combo: &[usize; 3], player: PlayerType) -> bool {
         let player = player as u8;
-        let (i1, i2, i3) = (combo[0], combo[1], combo[1]);
+        let (i1, i2, i3) = (combo[0], combo[1], combo[2]);
         self.board[i1] == player && self.board[i2] == player && self.board[i3] == player
     }
 }
@@ -245,6 +245,7 @@ async fn handle_socket(mut socket: WebSocket, who: SocketAddr,
                         game_state.turn = game_state.turn.next();
                         println!("game board state: {:?}", game_state.board);
                         if let Some(won) = game_state.check_win() {
+                            println!("my win assumed");
                             let mut sender = sender_for_this_player.lock().await;
                             let game_outcome = GameFinished { winner: false };
                             let final_message = ServerMessage { message: Some(Com_Message::GameFinished(game_outcome))};
@@ -291,6 +292,7 @@ async fn handle_socket(mut socket: WebSocket, who: SocketAddr,
 
                 let mut sender = sender.lock().await;
                 if let Some(won) = game_state.check_win() {
+                    println!("their win assumed");
                     let game_outcome = GameFinished { winner: false };
                     let final_message = ServerMessage { message: Some(Com_Message::GameFinished(game_outcome))};
                     let bytes = <ServerMessage as prost::Message>::encode_to_vec(&final_message);
