@@ -11,3 +11,5 @@ tower-http = { version = "0.6.2", features = ["fs", "trace"] }
 futures-util = { version = "0.3.31",  default-features = false, features = ["sink", "std"] }
 mime = "0.3.17"
 tokio-util = "0.7.13"
+prost = "0.13.5"
+messages = { path = "../messages"}

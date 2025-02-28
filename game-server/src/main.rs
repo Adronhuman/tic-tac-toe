@@ -3,13 +3,15 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::u64;
 use std::{net::SocketAddr, path::PathBuf};
-use axum::body::Body;
+use axum::body::{Body, Bytes};
 use axum::extract::ws::Utf8Bytes;
 use axum::extract::State;
 use axum::{extract::{ws::{Message, WebSocket}, ConnectInfo, WebSocketUpgrade}, http::{header, HeaderValue}, response::{Html, IntoResponse, Response}, routing::{any, get}, Router};
 use axum_extra::headers::Cookie;
 use axum_extra::TypedHeader;
 use futures_util::{lock, SinkExt, StreamExt};
+use messages::game::server_message::Message as Com_Message;
+use messages::game::{self, GameFinished, InitGame, PlayerMove, PlayerType, ServerMessage};
 use tokio::sync::broadcast::{channel, Receiver, Sender};
 use tokio::sync::{oneshot, Mutex};
 use tokio_util::io::ReaderStream;
@@ -37,17 +39,15 @@ async fn html_handler(TypedHeader(cookie): TypedHeader<Cookie>) -> Response {
         .into_response()
 }
 
-#[derive(PartialEq, Copy, Clone)]
-#[repr(u8)]
-enum PlayerType {
-    x_player = 1,
-    o_player = 2
+trait IPlayerType {
+    fn next(self) -> PlayerType;
 }
-impl PlayerType {
+
+impl IPlayerType for PlayerType {
     fn next(self) -> PlayerType {
         match self {
-            PlayerType::x_player => PlayerType::o_player,
-            PlayerType::o_player => PlayerType::x_player
+            PlayerType::X => PlayerType::O,
+            PlayerType::O => PlayerType::X
         }
     }
 }
@@ -59,16 +59,16 @@ struct GameState {
 }
 impl GameState {
     fn validate_move(&self, mv: usize, player: PlayerType) -> bool {
-        if self.board[mv] != 0 {
+        if self.board[mv] != 228 {
             return false;
         }
-        let xs = self.board.iter().filter(|x| **x == 1).count();
-        let os = self.board.iter().filter(|x| **x == 2).count();
+        let xs = self.board.iter().filter(|x| **x == PlayerType::X as u8).count();
+        let os = self.board.iter().filter(|x| **x == PlayerType::O as u8).count();
 
         if xs == os {
-            player == PlayerType::x_player
+            player == PlayerType::X
         } else {
-            player == PlayerType::o_player
+            player == PlayerType::O
         }
     }
 
@@ -85,11 +85,11 @@ impl GameState {
         ];
 
         for combo in &winning_combinations {
-            if self.check_combination(combo, PlayerType::x_player) {
-                return Some(PlayerType::x_player);
+            if self.check_combination(combo, PlayerType::X) {
+                return Some(PlayerType::X);
             }
-            if self.check_combination(combo, PlayerType::o_player) {
-                return Some(PlayerType::o_player);
+            if self.check_combination(combo, PlayerType::O) {
+                return Some(PlayerType::O);
             }
         }
         None
@@ -105,9 +105,9 @@ impl GameState {
 impl Default for GameState {
     fn default() -> Self {
         Self {
-            board: [0; 9],      // Empty board
-            turn: PlayerType::x_player,      // Assuming X starts first
-            you: PlayerType::o_player
+            board: [228; 9],      // Empty board
+            turn: PlayerType::X,      // Assuming X starts first
+            you: PlayerType::O
         }
     }
 }
@@ -119,7 +119,7 @@ struct AppState {
 }
 
 struct GameRequest {
-    messenger: Sender<String>,
+    messenger: Sender<Bytes>,
     call_me_back: oneshot::Sender<GameRequest>
 }
 
@@ -193,18 +193,31 @@ async fn handle_socket(mut socket: WebSocket, who: SocketAddr,
         drop(player_queue);
         
         let mut game_state_locked = game_state.lock().await;
-        game_state_locked.you = PlayerType::x_player;
+        game_state_locked.you = PlayerType::X;
         drop(game_state_locked);
 
         let opponent = rx_matchmaking.await.unwrap();
         opponent.messenger
     };
 
-    // Game started
-
+    println!("matched players!!");
+    // Client communication
     let (sender, mut receiver) = socket.split();
     let sender = Arc::new(Mutex::new(sender));
+    
+    // Send initial state to clients
+    {
+        let game_locked = game_state.lock().await;
+        let game_init = InitGame { your_player: game_locked.you as i32 };
+        let game_init_message = ServerMessage { message: Some(Com_Message::InitGame(game_init)) };
+        let sender_copy = Arc::clone(&sender);
+        let mut sender = sender_copy.lock().await;
+        let game_init_message = <ServerMessage as prost::Message>::encode_to_vec(&game_init_message);
+        sender.send(Message::Binary(Bytes::from(game_init_message))).await.unwrap();
+        println!("sent init game {:?}", game_init);
+    }
 
+    // Game Starteds
     let borrowed_state = Arc::clone(&state);
     let game_state_for_this_player = Arc::clone(&game_state);
     let sender_for_this_player = Arc::clone(&sender);
@@ -212,38 +225,41 @@ async fn handle_socket(mut socket: WebSocket, who: SocketAddr,
         while let Some(Ok(msg)) = receiver.next().await {
             match msg {
                 Message::Binary(bytes) => {
-                    // sender.send(Message::binary(bytes)).await.ok();
-                    let players_connections = borrowed_state.players_connections.lock().await;
-                    let x = players_connections.get(&1);
-                    if let Some(x) = x {
-                        if let Ok(_) = x.send(format!("Player {this_player} says hello with binary data")) {
+                    if let Ok(message) = <ServerMessage as prost::Message>::decode(&*bytes) {
+                        let player_move = if let Some(Com_Message::PlayerMove(pm)) = message.message {
+                            Some(pm)
+                        } else {None};
+                        if player_move == None {
+                            continue;
+                        }
+                        let player_move = player_move.unwrap();
+                        let mv = player_move.cell as usize;
 
-                        } else {
-                            println!("couldn't send");
+                        let mut game_state = game_state_for_this_player.lock().await;
+                        if !game_state.validate_move(mv, game_state.you) {
+                            println!("received invalid move");
+                            continue;
+                        }
+
+                        game_state.board[mv] = game_state.you as u8;
+                        game_state.turn = game_state.turn.next();
+                        println!("game board state: {:?}", game_state.board);
+                        if let Some(won) = game_state.check_win() {
+                            let mut sender = sender_for_this_player.lock().await;
+                            let game_outcome = GameFinished { winner: false };
+                            let final_message = ServerMessage { message: Some(Com_Message::GameFinished(game_outcome))};
+                            let bytes = <ServerMessage as prost::Message>::encode_to_vec(&final_message);
+                            sender.send(Message::Binary(Bytes::from(bytes))).await.unwrap();
+                        } 
+                        if let Err(err) = opponent_messenger.send(bytes) {
+                            println!("wtf error is {err}");
                         }
                     } else {
-                       println!("number 1 was not found");
+                        println!("failed to decode protobuf message");
                     }
                 },
                 Message::Text(str) => {
-                    println!("received text message from client {str}");
-                    let mut game_state = game_state_for_this_player.lock().await;
-                    let mv = str.to_string().parse::<usize>().unwrap();
-                    if !game_state.validate_move(mv, game_state.you) {
-                        println!("received invalid move");
-                        continue;
-                    }
-
-                    game_state.board[mv] = game_state.you as u8;
-                    game_state.turn = game_state.turn.next();
-                    println!("game board state: {:?}", game_state.board);
-                    if let Some(won) = game_state.check_win() {
-                        let mut sender = sender_for_this_player.lock().await;
-                        sender.send(Message::Text(Utf8Bytes::from("you won!!!"))).await.unwrap();
-                    } 
-                    if let Err(err) = opponent_messenger.send(str.to_string()) {
-                        println!("wtf error is {err}");
-                    }
+                    println!("text is not supported anymore");
                 },
                 _ => {}
             }
@@ -255,21 +271,38 @@ async fn handle_socket(mut socket: WebSocket, who: SocketAddr,
     let game_state_ref = Arc::clone(&game_state);
     let recv_others_task = tokio::spawn(async move {
         while let Ok(msg) = my_messenger.recv().await {
-            let mut game_state = game_state_ref.lock().await;
-            let mv = msg.parse::<usize>().unwrap();
-            if !game_state.validate_move(mv, game_state.you.next()) {
-                println!("received invalid move");
-                continue;
-            }
+            if let Ok(message) = <ServerMessage as prost::Message>::decode(&*msg) {
+                let mut game_state = game_state_ref.lock().await;
+                let player_move = if let Some(Com_Message::PlayerMove(pm)) = message.message {
+                    Some(pm)
+                } else {None};
+                if player_move == None {
+                    continue;
+                }
+                let player_move = player_move.unwrap();
+                let mv = player_move.cell as usize;
+                if !game_state.validate_move(mv, game_state.you.next()) {
+                    println!("received invalid move");
+                    continue;
+                }
 
-            game_state.board[mv] = game_state.you.next() as u8;
-            game_state.turn = game_state.turn.next();
+                game_state.board[mv] = game_state.you.next() as u8;
+                game_state.turn = game_state.turn.next();
 
-            let mut sender = sender.lock().await;
-            if let Some(won) = game_state.check_win() {
-                sender.send(Message::Text(Utf8Bytes::from("you lose!!!"))).await.unwrap();    
+                let mut sender = sender.lock().await;
+                if let Some(won) = game_state.check_win() {
+                    let game_outcome = GameFinished { winner: false };
+                    let final_message = ServerMessage { message: Some(Com_Message::GameFinished(game_outcome))};
+                    let bytes = <ServerMessage as prost::Message>::encode_to_vec(&final_message);
+                    sender.send(Message::Binary(Bytes::from(bytes))).await.unwrap();
+                } else {
+                    let player_move = PlayerMove { cell: mv as u32 };
+                    let move_message = ServerMessage { message: Some(Com_Message::PlayerMove(player_move))};
+                    let bytes = <ServerMessage as prost::Message>::encode_to_vec(&move_message);
+                    sender.send(Message::Binary(Bytes::from(bytes))).await.unwrap();
+                } 
             } else {
-                sender.send(Message::Text(Utf8Bytes::from(msg))).await.unwrap();
+
             }
         }
     });

@@ -2,22 +2,27 @@ syntax = "proto3";
 
 package game;
 
-message Update {
-    oneof update_message {
-        Chat chat_update = 1;
-        MetaInfo meta_update = 2;
-        PlayerMove move_update = 3;
+enum PlayerType {
+    X = 0;
+    O = 1;
+}
+
+message ServerMessage {
+    oneof message {
+        InitGame init_game = 1;
+        PlayerMove player_move = 2;
+        GameFinished game_finished = 3;
     }
 }
 
-message Chat {
-    string sms = 1;
-}
-
-message MetaInfo {
-    string info = 1;
+message InitGame {
+    PlayerType your_player = 1;
 }
 
 message PlayerMove {
-    int32 move = 1;
+    uint32 cell = 1;
+}
+
+message GameFinished {
+    bool winner = 1;
 }

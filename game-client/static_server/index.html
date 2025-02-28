@@ -7,19 +7,24 @@
   <body>
     <script>
         const socket = new WebSocket("ws://localhost:3001/ws");
+        socket.binaryType = "arraybuffer";
 
         socket.addEventListener("open", (event) => {
-            socket.send("Hello Server!");
+          console.log("socket connection was opened");            
+        });
+        socket.addEventListener("message", (event) => {
+          console.log('received data from server', event.data);
+          window.socketDataHandler(event.data);
         });
         window.socketDataHandler = () => {};
 
         function listenToSocketData(handler) {
-          console.log("at least tried to pass something", handler);
           window.socketDataHandler = handler;
         }
 
         function sendDataToSocket(data) {
-          console.log("received data", data);
+          console.log("sending data to server", data);
+          socket.send(data);
         }
     </script>
     <script type="module">
@@ -29,8 +34,8 @@
       });
       // setInterval(() => {
       // }, 1000);
-      window.byteArray = crypto.getRandomValues(new Uint8Array(8));
-      window.socketDataHandler(window.byteArray);
+      // window.byteArray = crypto.getRandomValues(new Uint8Array(8));
+      // window.socketDataHandler(window.byteArray);
       </script>
   </body>
 </html>
