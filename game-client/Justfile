@@ -6,5 +6,5 @@ sudo-build:
 build:
     wasm-pack build --target web --out-dir static_server
     
-copy-main:
-    copy target\\wasm32-unknown-unknown\\debug\\bevy_wasm.wasm static_server /y
+copy-assets:
+    xcopy assets static_server\assets /E /y
