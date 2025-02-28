@@ -6,16 +6,32 @@
   </head>
   <body>
     <script>
-        const socket = new WebSocket("ws://localhost:3001/ws");
-        socket.binaryType = "arraybuffer";
 
-        socket.addEventListener("open", (event) => {
-          console.log("socket connection was opened");            
-        });
-        socket.addEventListener("message", (event) => {
-          console.log('received data from server', event.data);
-          window.socketDataHandler(event.data);
-        });
+      // workaround for testing on localnetwork
+      const primaryUrl = "ws://192.168.0.104:80/ws";
+      const backupUrl = "ws://localhost:80/ws";
+      window.socket = undefined;
+
+        function createWebSocket(url) {
+          window.socket = new WebSocket(`${url}`);
+          socket.binaryType = "arraybuffer";
+  
+          socket.addEventListener("error", (e) => {
+            console.log('socket connection failed');
+            if (url == primaryUrl) {
+              createWebSocket(backupUrl);
+            }
+          })
+          
+          socket.addEventListener("open", (event) => {
+            console.log("socket connection was opened");            
+          });
+          socket.addEventListener("message", (event) => {
+            console.log('received data from server', event.data);
+            window.socketDataHandler(event.data);
+          });
+        }
+
         window.socketDataHandler = () => {};
 
         function listenToSocketData(handler) {
@@ -26,6 +42,7 @@
           console.log("sending data to server", data);
           socket.send(data);
         }
+        createWebSocket(primaryUrl);
     </script>
     <script type="module">
       import init, { start_bevy } from "./game_client.js";

@@ -1,9 +1,11 @@
 mod network;
 mod javascript;
+mod meta;
 
-use bevy::{app::{App, Startup, Update}, asset::AssetServer, color::Color, core_pipeline::core_2d::Camera2d, ecs::{event::{Event, EventReader, EventWriter}, query::With, schedule::{common_conditions::on_event, IntoSystemConfigs}, system::{Commands, Query, Res, ResMut, Resource, Single}}, hierarchy::{BuildChildren, ChildBuild}, input::{keyboard::KeyCode, mouse::MouseButton, ButtonInput}, math::Vec3, render::camera::Camera, sprite::Sprite, text::{TextColor, TextFont}, transform::components::{GlobalTransform, Transform}, ui::{widget::Text, AlignItems, BackgroundColor, FlexDirection, JustifyContent, Node, RelativeCursorPosition, UiRect, Val}, utils::default, window::{CursorMoved, PrimaryWindow, Window}, winit::WinitSettings, DefaultPlugins};
+use bevy::{app::{App, Startup, Update}, asset::{AssetServer, Assets}, color::Color, core_pipeline::core_2d::Camera2d, ecs::{component::Component, entity::Entity, event::{Event, EventReader, EventWriter}, query::With, schedule::{common_conditions::on_event, IntoSystemConfigs}, system::{Commands, Query, Res, ResMut, Resource, Single}}, hierarchy::{BuildChildren, ChildBuild, DespawnRecursiveExt}, input::{keyboard::KeyCode, mouse::MouseButton, ButtonInput}, math::Vec3, render::camera::Camera, sprite::{ColorMaterial, MeshMaterial2d, Sprite}, text::{cosmic_text::ttf_parser::{Rect, Style}, FontStyle, JustifyText, TextColor, TextFont, TextLayout}, transform::components::{GlobalTransform, Transform}, ui::{node_bundles::NodeBundle, widget::Text, AlignItems, BackgroundColor, FlexDirection, JustifyContent, JustifyItems, Node, PositionType, RelativeCursorPosition, UiRect, Val}, utils::default, window::{CursorMoved, PrimaryWindow, Window}, winit::WinitSettings, DefaultPlugins};
 use messages::game::{server_message::Message, PlayerMove, PlayerType, ServerMessage};
 use network::socket_plugin::{SocketPlugin, SocketRecv, SocketSend};
+use meta::ui::{self, GameUI, MetaEvent};
 use wasm_bindgen::{prelude::{wasm_bindgen, Closure}, JsCast};
 use javascript::bindings::log;
 
@@ -31,7 +33,7 @@ pub fn start_bevy() {
 
     App::new()
         .insert_resource(game_state)
-        .add_plugins((DefaultPlugins, SocketPlugin))
+        .add_plugins((DefaultPlugins, SocketPlugin, GameUI))
         .add_systems(Startup, setup)
         .add_systems(Update, draw.run_if(on_event::<DrawRequest>))
         .add_systems(Update, (handle_update_from_network.run_if(on_event::<SocketRecv>)))
@@ -44,7 +46,7 @@ pub fn start_bevy() {
 
 fn setup(
     mut commands: Commands,
-    asset_server: Res<AssetServer>,
+    asset_server: Res<AssetServer>
 ) {
     commands.spawn(Camera2d);
 
@@ -54,40 +56,7 @@ fn setup(
             translation: Vec3::new(0., 0., 0.),
             ..default()
         }
-    )).insert(RelativeCursorPosition::default());
-
-    // commands
-    //     .spawn(Node {
-    //         width: Val::Percent(100.),
-    //         height: Val::Percent(100.0),
-    //         align_items: AlignItems::Center,
-    //         justify_content: JustifyContent::Center,
-    //         flex_direction: FlexDirection::Column,
-    //         ..default()
-    //     })
-    //     .with_children(|parent| {
-    //         parent
-    //             .spawn((
-    //                 Node {
-    //                     width: Val::Px(250.),
-    //                     height: Val::Px(250.),
-    //                     margin: UiRect::bottom(Val::Px(15.)),
-    //                     ..default()
-    //                 },
-    //                 BackgroundColor(Color::srgb(235., 35., 12.)),
-    //             ))
-    //             .insert(RelativeCursorPosition::default());
-    //         parent.spawn((
-    //             Text::new("(0.0, 0.0)"),
-    //             TextFont {
-    //                 font: asset_server.load("fonts/FiraSans-Bold.ttf"),
-    //                 font_size: 33.0,
-    //                 ..default()
-    //             },
-    //             TextColor(Color::srgb(0.9, 0.9, 0.9)),
-    //         ));
-    //     });
-
+    ));
 }
 
 #[derive(Event, Debug)]
@@ -127,7 +96,8 @@ fn draw(
 fn handle_update_from_network(
     mut game_state: ResMut<GameState>,
     mut ev_message: EventReader<SocketRecv>,
-    mut draw_queue: EventWriter<DrawRequest>
+    mut draw_queue: EventWriter<DrawRequest>,
+    mut meta_event: EventWriter<MetaEvent>
 ) {
     for SocketRecv(ev) in ev_message.read() {
         console_log!("receive network update event");
@@ -138,10 +108,12 @@ fn handle_update_from_network(
                         game_state.is_your_turn = true;
                         game_state.me = PlayerType::X;
                     }
+                    meta_event.send(MetaEvent::OpponentFound);
                     console_log!("got init game: {:?}; {:?}", game_state, g.your_player);
                 }
                 Message::GameFinished(f) => {
                     game_state.game_finished = Some(f.winner);
+                    meta_event.send(MetaEvent::GameFinished(f.winner));
                 }
                 Message::PlayerMove(mv) => {
                     let cell = mv.cell as usize;

@@ -143,7 +143,7 @@ async fn main() {
         .route("/ws", any(ws_handler))
         .with_state(app_state);
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3001").await.unwrap();
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:80").await.unwrap();
     axum::serve(
         listener, 
         app.into_make_service_with_connect_info::<SocketAddr>()
@@ -247,7 +247,7 @@ async fn handle_socket(mut socket: WebSocket, who: SocketAddr,
                         if let Some(won) = game_state.check_win() {
                             println!("my win assumed");
                             let mut sender = sender_for_this_player.lock().await;
-                            let game_outcome = GameFinished { winner: false };
+                            let game_outcome = GameFinished { winner: true };
                             let final_message = ServerMessage { message: Some(Com_Message::GameFinished(game_outcome))};
                             let bytes = <ServerMessage as prost::Message>::encode_to_vec(&final_message);
                             sender.send(Message::Binary(Bytes::from(bytes))).await.unwrap();
